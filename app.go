@@ -74,9 +74,9 @@ func (a *App) ServeHTTP(_ http.ResponseWriter, r *http.Request) {
 
 func (a *App) someSubStackScopeCall(ctx context.Context) error {
 	// make external request with tracing
-	req, _ := http.NewRequest(http.MethodGet, "/", strings.NewReader("Hello, world!"))
+	req, _ := http.NewRequest(http.MethodGet, a.host+"/", strings.NewReader("Hello, world!"))
 	req = req.WithContext(ctx)
-	_, _ = a.client.Do(req)
+	fmt.Println(a.client.Do(req))
 
 	// take span from context -> take tracing id from span
 	span := trace.SpanFromContext(ctx)
