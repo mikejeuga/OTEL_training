@@ -20,7 +20,7 @@ type App struct {
 	host   string
 }
 
-func NewHTTPHandler(host string, l *log.Logger, propagator propagation.TextMapPropagator, tracer trace.Tracer) http.Handler {
+func NewHTTPHandler(host string, l *log.Logger, propagator propagation.TextMapPropagator, tracerProvider trace.TracerProvider) http.Handler {
 	app := &App{
 		l:    l,
 		host: host,
@@ -44,15 +44,16 @@ func NewHTTPHandler(host string, l *log.Logger, propagator propagation.TextMapPr
 		},
 	}
 	// wrap App with open telemetry middleware
-	return traceIDMiddleware(app, propagator, tracer)
+	return traceIDMiddleware(app, propagator, tracerProvider)
 }
 
-func traceIDMiddleware(next http.Handler, propagator propagation.TextMapPropagator, tracer trace.Tracer) http.Handler {
+func traceIDMiddleware(next http.Handler, propagator propagation.TextMapPropagator, tracerProvider trace.TracerProvider) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// shovel the tracing ID from the incoming HTTP request into the next HTTP Handler's request context.
 		carrier := HeaderCarrier(r.Header)              // source of truth
 		ctx := propagator.Extract(r.Context(), carrier) // creating a new context with tracing ID in it
-		ctx, span := tracer.Start(ctx, "example-URL-path")
+		fmt.Printf("%#v\n", ctx)
+		ctx, span := tracerProvider.Tracer("i.n.").Start(ctx, "example-URL-path")
 		defer span.End()
 		next.ServeHTTP(w, r.WithContext(ctx)) // call next http.Handler with the context that has the tracingID
 	})
