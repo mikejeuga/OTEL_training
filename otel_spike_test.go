@@ -34,17 +34,21 @@ func TestSpikeOTEL(t *testing.T) {
 	assert.Must(t).Nil(err)
 
 	tracerProvider := traceSDK.NewTracerProvider(
-		traceSDK.WithSpanProcessor(traceSDK.NewSimpleSpanProcessor(spanExporter)),
+		traceSDK.WithSpanProcessor(&DebugSpanProcessor{TB: t,
+			SpanProcessor: traceSDK.NewSimpleSpanProcessor(&DebugSpanExporter{TB: t,
+				SpanExporter: spanExporter})}),
 		traceSDK.WithResource(res),
 	)
 
-	// we never investigated the options they pass to the .Tracer call.
-	// hmmm
-	ctx, span := tracerProvider.
-		Tracer("name").        // TODO: check tracer options
-		Start(ctx, "spanName") // TODO: check span options
+	func() {
+		// we never investigated the options they pass to the .Tracer call.
+		// hmmm
+		_, span := tracerProvider.
+			Tracer("name").        // TODO: check tracer options
+			Start(ctx, "spanName") // TODO: check span options
 
-	span.End() // TODO: check end options?
+		defer span.End() // TODO: check end options?
+	}()
 
 	t.Log(buf.String())
 }

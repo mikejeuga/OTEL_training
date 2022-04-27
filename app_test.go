@@ -95,7 +95,6 @@ func makeTracingPropagation(tb testing.TB) TracingSubject {
 	//spanExporter := &tracetest.NoopExporter{}
 
 	buf := &bytes.Buffer{}
-	tb.Cleanup(func() { tb.Log(buf.String()) })
 	ppExporter, err := newIOWriterExporter(buf)
 
 	res, err := resource.New(ctx, resource.WithAttributes(semconv.ServiceNameKey.String("ags-test")))
@@ -224,20 +223,23 @@ func newRandomIDGenerator() *randomIDGenerator {
 }
 
 // traceSDK.SpanExporter
-type DebugSpanExporter struct{ TB testing.TB }
+type DebugSpanExporter struct {
+	TB           testing.TB
+	SpanExporter traceSDK.SpanExporter
+}
 
 var _ traceSDK.SpanExporter = &DebugSpanExporter{}
 
 func (exp DebugSpanExporter) ExportSpans(ctx context.Context, spans []traceSDK.ReadOnlySpan) error {
 	exp.TB.Helper()
 	exp.TB.Logf("DebugSpanExporter.ExportSpans:  %#v", spans)
-	return nil
+	return exp.SpanExporter.ExportSpans(ctx, spans)
 }
 
 func (exp DebugSpanExporter) Shutdown(ctx context.Context) error {
 	exp.TB.Helper()
 	exp.TB.Logf("DebugSpanExporter is shutting down")
-	return nil
+	return exp.SpanExporter.Shutdown(ctx)
 }
 
 type DebugSpanProcessor struct {
