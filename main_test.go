@@ -35,7 +35,8 @@ func TestE2E(t *testing.T) {
 		}
 
 		actualTraceID := r.Header.Get(headerKey)
-		assert.Should(t).Equal(expectedTraceIDHeader, actualTraceID)
+		assert.Should(t).NotEmpty(actualTraceID, "we should have a tracing id received in the request")
+		assert.Should(t).Contain(actualTraceID, tID.String(), "the initial parent tracing ID should be present")
 	}))
 	defer srv.Close()
 

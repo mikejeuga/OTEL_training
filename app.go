@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	trace2 "go.opentelemetry.io/otel/sdk/trace"
 	"log"
 	"net/http"
 	"strings"
@@ -27,7 +28,8 @@ func NewHTTPHandler(host string, l *log.Logger) http.Handler {
 	// 	propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
 	// )
 	propagator := propagation.TraceContext{}
-
+	tp := trace2.NewTracerProvider()
+	tracer := tp.Tracer("spikeTKI")
 	app := &App{
 		l:    l,
 		host: host,
@@ -51,20 +53,20 @@ func NewHTTPHandler(host string, l *log.Logger) http.Handler {
 		},
 	}
 	// wrap App with open telemetry middleware
-	return traceIDMiddleware(app, propagator)
+	return traceIDMiddleware(app, propagator, tracer)
 }
 
-func traceIDMiddleware(next http.Handler, propagator propagation.TextMapPropagator) http.Handler {
+func traceIDMiddleware(next http.Handler, propagator propagation.TextMapPropagator, tracer trace.Tracer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, err := trace.TraceIDFromHex(r.Header.Get("traceparent"))
-		if err != nil {
-			log.Println("ERROR", err.Error())
-		}
-
 		// shovel the tracing ID from the incoming HTTP request into the next HTTP Handler's request context.
 		carrier := HeaderCarrier(r.Header)              // source of truth
 		ctx := propagator.Extract(r.Context(), carrier) // creating a new context with tracing ID in it
-		next.ServeHTTP(w, r.WithContext(ctx))           // call next http.Handler with the context that has the tracingID
+		ctx, span := tracer.Start(ctx, "example-URL-path")
+
+		log.Println("This is the TraceID: " + trace.SpanContextFromContext(ctx).TraceID().String())
+		defer span.End()
+
+		next.ServeHTTP(w, r.WithContext(ctx)) // call next http.Handler with the context that has the tracingID
 	})
 }
 
