@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	trace2 "go.opentelemetry.io/otel/sdk/trace"
 	"log"
 	"net/http"
 	"strings"
@@ -21,15 +20,7 @@ type App struct {
 	host   string
 }
 
-func NewHTTPHandler(host string, l *log.Logger) http.Handler {
-
-	// configure the open telemetry
-	// otel.SetTextMapPropagator(
-	// 	propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
-	// )
-	propagator := propagation.TraceContext{}
-	tp := trace2.NewTracerProvider()
-	tracer := tp.Tracer("spikeTKI")
+func NewHTTPHandler(host string, l *log.Logger, propagator propagation.TextMapPropagator, tracer trace.Tracer) http.Handler {
 	app := &App{
 		l:    l,
 		host: host,

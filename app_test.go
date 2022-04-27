@@ -6,6 +6,8 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"go.opentelemetry.io/otel/propagation"
+	trace2 "go.opentelemetry.io/otel/sdk/trace"
 	"log"
 	"math/rand"
 	"net/http"
@@ -24,6 +26,27 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+type Subject struct {
+	Handler      http.Handler
+	LoggerBuffer *bytes.Buffer
+	TraceBuf     *bytes.Buffer
+}
+
+func NewSubject(tb testing.TB, url string) Subject {
+	logBuf := &bytes.Buffer{}
+	traceBuf := &bytes.Buffer{}
+	logger := log.New(logBuf, "", log.LstdFlags)
+	propagator := propagation.TraceContext{}
+	tp := trace2.NewTracerProvider()
+	tracer := tp.Tracer("spikeTKI")
+
+	return Subject{
+		Handler:      NewHTTPHandler(url, logger, propagator, tracer),
+		LoggerBuffer: logBuf,
+		TraceBuf:     traceBuf,
+	}
+}
+
 func TestE2E(t *testing.T) {
 	tID, sID := newTraceID()
 	expectedTraceIDHeader := traceIDToHeader(tID, sID)
@@ -40,16 +63,13 @@ func TestE2E(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	var buf bytes.Buffer
-	logger := log.New(&buf, "", log.LstdFlags)
-	handler := NewHTTPHandler(srv.URL, logger)
-
+	subject := NewSubject(t, srv.URL)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerKey, expectedTraceIDHeader)
-	handler.ServeHTTP(rr, req)
+	subject.Handler.ServeHTTP(rr, req)
 	assert.Must(t).Equal(http.StatusOK, rr.Code)
-	assert.Must(t).Contain(buf.String(), tID.String())
+	assert.Must(t).Contain(subject.LoggerBuffer.String(), tID.String())
 }
 
 func TestE2E_noTraceIDSent_TraceIDReceived(t *testing.T) {
@@ -57,12 +77,10 @@ func TestE2E_noTraceIDSent_TraceIDReceived(t *testing.T) {
 		assert.Should(t).NotEmpty(r.Header.Get(headerKey))
 	})
 
-	logger := log.New(&bytes.Buffer{}, "", log.LstdFlags)
-	handler := NewHTTPHandler(srv.URL, logger)
-
+	subject := NewSubject(t, srv.URL)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	handler.ServeHTTP(rr, req)
+	subject.Handler.ServeHTTP(rr, req)
 	assert.Must(t).Equal(http.StatusOK, rr.Code)
 }
 
