@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 	"log"
 	"net/http"
 	"strings"
+
+	"go.opentelemetry.io/otel/propagation"
 
 	"go.opentelemetry.io/otel/trace"
 )
@@ -23,10 +23,10 @@ type App struct {
 func NewHTTPHandler(host string, l *log.Logger) http.Handler {
 
 	// configure the open telemetry
-	otel.SetTextMapPropagator(
-		propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
-	)
-	propagator := otel.GetTextMapPropagator()
+	// otel.SetTextMapPropagator(
+	// 	propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
+	// )
+	propagator := propagation.TraceContext{}
 
 	app := &App{
 		l:    l,
@@ -36,10 +36,16 @@ func NewHTTPHandler(host string, l *log.Logger) http.Handler {
 				// shovel the tracing ID from the context into the outgoing HTTP Request
 
 				// open telnet TextMap Propagator with Carrier for the round tripped request to inject headers.
-				ctx := req.Context()                             // contains the tracingID
-				carrier := propagation.HeaderCarrier(req.Header) // mapping to the outgoing headers, that will carry the tracing ID
-				propagator.Inject(ctx, carrier)                  // put the tracing ID from context into the http.Header (HeaderCarrier)
+				ctx := req.Context()                 // contains the tracingID
+				carrier := HeaderCarrier(req.Header) // mapping to the outgoing headers, that will carry the tracing ID
+				propagator.Inject(ctx, carrier)      // put the tracing ID from context into the http.Header (HeaderCarrier)
 
+				sc := trace.SpanContextFromContext(ctx)
+				if !sc.IsValid() {
+					panic("boom")
+				}
+
+				fmt.Println(trace.SpanContextFromContext(ctx).TraceID())
 				return http.DefaultTransport.RoundTrip(req)
 			}),
 		},
@@ -50,17 +56,15 @@ func NewHTTPHandler(host string, l *log.Logger) http.Handler {
 
 func traceIDMiddleware(next http.Handler, propagator propagation.TextMapPropagator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := trace.TraceIDFromHex(r.Header.Get("traceparent"))
+		if err != nil {
+			log.Println("ERROR", err.Error())
+		}
+
 		// shovel the tracing ID from the incoming HTTP request into the next HTTP Handler's request context.
-		fmt.Println(r.Header.Get("traceparent"))
-		traceID, err := trace.TraceIDFromHex(r.Header.Get("traceparent"))
-
-		fmt.Printf("%#v - %v\n", traceID, err)
-		carrier := HeaderCarrier(r.Header) // source of truth
-
+		carrier := HeaderCarrier(r.Header)              // source of truth
 		ctx := propagator.Extract(r.Context(), carrier) // creating a new context with tracing ID in it
-
-		fmt.Printf("%#v\n", otel.GetTextMapPropagator())
-		next.ServeHTTP(w, r.WithContext(ctx)) // call next http.Handler with the context that has the tracingID
+		next.ServeHTTP(w, r.WithContext(ctx))           // call next http.Handler with the context that has the tracingID
 	})
 }
 
@@ -97,7 +101,7 @@ func (hc HeaderCarrier) Get(key string) string {
 
 // Set stores the key-value pair.
 func (hc HeaderCarrier) Set(key string, value string) {
-	fmt.Println("header key:", key)
+	fmt.Println("header key:", key, "header value:", value)
 	http.Header(hc).Set(key, value)
 }
 
