@@ -38,7 +38,7 @@ func NewHTTPHandler(host string, l *log.Logger, propagator propagation.TextMapPr
 					panic("boom")
 				}
 
-				fmt.Println(trace.SpanContextFromContext(ctx).TraceID())
+				//fmt.Println(trace.SpanContextFromContext(ctx).TraceID())
 				return http.DefaultTransport.RoundTrip(req)
 			}),
 		},
@@ -53,10 +53,7 @@ func traceIDMiddleware(next http.Handler, propagator propagation.TextMapPropagat
 		carrier := HeaderCarrier(r.Header)              // source of truth
 		ctx := propagator.Extract(r.Context(), carrier) // creating a new context with tracing ID in it
 		ctx, span := tracer.Start(ctx, "example-URL-path")
-
-		log.Println("This is the TraceID: " + trace.SpanContextFromContext(ctx).TraceID().String())
 		defer span.End()
-
 		next.ServeHTTP(w, r.WithContext(ctx)) // call next http.Handler with the context that has the tracingID
 	})
 }

@@ -7,7 +7,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"go.opentelemetry.io/otel/propagation"
-	trace2 "go.opentelemetry.io/otel/sdk/trace"
+	traceSDK "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"log"
 	"math/rand"
 	"net/http"
@@ -27,36 +28,38 @@ func init() {
 }
 
 type Subject struct {
-	Handler      http.Handler
-	LoggerBuffer *bytes.Buffer
-	TraceBuf     *bytes.Buffer
+	Handler          http.Handler
+	LoggerBuffer     *bytes.Buffer
+	TraceBuf         *bytes.Buffer
+	InMemoryExporter *tracetest.InMemoryExporter
+	TracerProvider   *traceSDK.TracerProvider
 }
 
 func NewSubject(tb testing.TB, url string) Subject {
 	logBuf := &bytes.Buffer{}
-	traceBuf := &bytes.Buffer{}
+	inMemoryExporter := &tracetest.InMemoryExporter{}
 	logger := log.New(logBuf, "", log.LstdFlags)
 	propagator := propagation.TraceContext{}
-	tp := trace2.NewTracerProvider()
-	tracer := tp.Tracer("spikeTKI")
+	spanProcessorForExporting := traceSDK.NewBatchSpanProcessor(&DebugSpanExporter{TB: tb})
+	tracerProvider := traceSDK.NewTracerProvider(traceSDK.WithSpanProcessor(spanProcessorForExporting))
+	tracer := tracerProvider.Tracer("spikeTKI")
 
 	return Subject{
-		Handler:      NewHTTPHandler(url, logger, propagator, tracer),
-		LoggerBuffer: logBuf,
-		TraceBuf:     traceBuf,
+		Handler:          NewHTTPHandler(url, logger, propagator, tracer),
+		LoggerBuffer:     logBuf,
+		InMemoryExporter: inMemoryExporter,
+		TracerProvider:   tracerProvider,
 	}
 }
 
 func TestE2E(t *testing.T) {
+	must := assert.Must(t)
+
 	tID, sID := newTraceID()
 	expectedTraceIDHeader := traceIDToHeader(tID, sID)
 	t.Log("expectedTraceID Header:", expectedTraceIDHeader)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for k, v := range r.Header {
-			t.Logf("%s: %s", k, v)
-		}
-
 		actualTraceID := r.Header.Get(headerKey)
 		assert.Should(t).NotEmpty(actualTraceID, "we should have a tracing id received in the request")
 		assert.Should(t).Contain(actualTraceID, tID.String(), "the initial parent tracing ID should be present")
@@ -68,8 +71,11 @@ func TestE2E(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerKey, expectedTraceIDHeader)
 	subject.Handler.ServeHTTP(rr, req)
-	assert.Must(t).Equal(http.StatusOK, rr.Code)
-	assert.Must(t).Contain(subject.LoggerBuffer.String(), tID.String())
+	must.Equal(http.StatusOK, rr.Code)
+	must.Contain(subject.LoggerBuffer.String(), tID.String())
+
+	must.Nil(subject.TracerProvider.ForceFlush(context.Background()))
+	t.Logf("%#v", subject.InMemoryExporter.GetSpans())
 }
 
 func TestE2E_noTraceIDSent_TraceIDReceived(t *testing.T) {
@@ -130,4 +136,21 @@ func newRandomIDGenerator() *randomIDGenerator {
 	_ = binary.Read(crand.Reader, binary.LittleEndian, &rngSeed)
 	gen.randSource = rand.New(rand.NewSource(rngSeed))
 	return gen
+}
+
+var _ traceSDK.SpanExporter = &DebugSpanExporter{}
+
+// traceSDK.SpanExporter
+type DebugSpanExporter struct{ TB testing.TB }
+
+func (exp DebugSpanExporter) ExportSpans(ctx context.Context, spans []traceSDK.ReadOnlySpan) error {
+	exp.TB.Helper()
+	exp.TB.Logf("DebugSpanExporter.ExportSpans:  %#v", spans)
+	return nil
+}
+
+func (exp DebugSpanExporter) Shutdown(ctx context.Context) error {
+	exp.TB.Helper()
+	exp.TB.Logf("DebugSpanExporter is shutting down")
+	return nil
 }
