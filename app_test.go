@@ -52,7 +52,7 @@ func NewSubject(tb testing.TB, url string) Subject {
 	//propagator := propagation.TraceContext{}
 	//otel.SetTextMapPropagator(propagator)
 	//
-	//spanProcessorForExporting := &DebugSpanProcessor{TB: tb, SpanProcessor: traceSDK.NewSimpleSpanProcessor(&DebugSpanExporter{TB: tb})}
+	//spanProcessorForExporting := &SpySpanProcessor{TB: tb, SpanProcessor: traceSDK.NewSimpleSpanProcessor(&SpySpanExporter{TB: tb})}
 	//tracerProvider := traceSDK.NewTracerProvider(
 	//	traceSDK.WithSpanProcessor(spanProcessorForExporting),
 	//	traceSDK.WithResource(newResource(tb)),
@@ -220,55 +220,6 @@ func newRandomIDGenerator() *randomIDGenerator {
 	_ = binary.Read(crand.Reader, binary.LittleEndian, &rngSeed)
 	gen.randSource = rand.New(rand.NewSource(rngSeed))
 	return gen
-}
-
-// traceSDK.SpanExporter
-type DebugSpanExporter struct {
-	TB           testing.TB
-	SpanExporter traceSDK.SpanExporter
-}
-
-var _ traceSDK.SpanExporter = &DebugSpanExporter{}
-
-func (exp DebugSpanExporter) ExportSpans(ctx context.Context, spans []traceSDK.ReadOnlySpan) error {
-	exp.TB.Helper()
-	exp.TB.Logf("DebugSpanExporter.ExportSpans:  %#v", spans)
-	return exp.SpanExporter.ExportSpans(ctx, spans)
-}
-
-func (exp DebugSpanExporter) Shutdown(ctx context.Context) error {
-	exp.TB.Helper()
-	exp.TB.Logf("DebugSpanExporter is shutting down")
-	return exp.SpanExporter.Shutdown(ctx)
-}
-
-type DebugSpanProcessor struct {
-	testing.TB
-	traceSDK.SpanProcessor
-}
-
-func (sp *DebugSpanProcessor) OnStart(parent context.Context, s traceSDK.ReadWriteSpan) {
-	sp.TB.Helper()
-	sp.TB.Logf("DebugSpanProcessor.OnStart: %#v", s)
-	sp.SpanProcessor.OnStart(parent, s)
-}
-
-func (sp *DebugSpanProcessor) OnEnd(s traceSDK.ReadOnlySpan) {
-	sp.TB.Helper()
-	sp.TB.Logf("DebugSpanProcessor.OnEnd: %#v", s)
-	sp.SpanProcessor.OnEnd(s)
-}
-
-func (sp *DebugSpanProcessor) Shutdown(ctx context.Context) error {
-	sp.TB.Helper()
-	sp.TB.Logf("DebugSpanProcessor.Shutdown: %#v", ctx)
-	return sp.SpanProcessor.Shutdown(ctx)
-}
-
-func (sp *DebugSpanProcessor) ForceFlush(ctx context.Context) error {
-	sp.TB.Helper()
-	sp.TB.Logf("DebugSpanProcessor.ForceFlush: %#v", ctx)
-	return sp.SpanProcessor.ForceFlush(ctx)
 }
 
 func newIOWriterExporter(w io.Writer) (traceSDK.SpanExporter, error) {
