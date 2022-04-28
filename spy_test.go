@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"github.com/adamluzsi/testcase/assert"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"testing"
 
 	traceSDK "go.opentelemetry.io/otel/sdk/trace"
@@ -54,4 +57,23 @@ func (sp *SpySpanProcessor) ForceFlush(ctx context.Context) error {
 	sp.TB.Helper()
 	sp.TB.Logf("SpySpanProcessor.ForceFlush: %#v", ctx)
 	return sp.SpanProcessor.ForceFlush(ctx)
+}
+
+func newSpyExporter(tb testing.TB) traceSDK.SpanExporter {
+	tb.Helper()
+	buf := &bytes.Buffer{}
+	tb.Cleanup(func() {
+		tb.Helper()
+		tb.Logf("\n%s", buf.String())
+	})
+	se, err := stdouttrace.New(
+		stdouttrace.WithWriter(buf),
+		// Use human-readable output.
+		stdouttrace.WithPrettyPrint(),
+		// Do not print timestamps for the demo.
+		stdouttrace.WithoutTimestamps(),
+	)
+	assert.Must(tb).Nil(err)
+	tb.Cleanup(func() { se.Shutdown(context.Background()) })
+	return se
 }

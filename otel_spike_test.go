@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"github.com/adamluzsi/testcase/assert"
+	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 
@@ -24,10 +28,13 @@ func newExporter(w io.Writer) (traceSDK.SpanExporter, error) {
 }
 
 func TestSpikeOTEL(t *testing.T) {
+	var spanExporter traceSDK.SpanExporter = tracetest.NewNoopExporter()
+	spanExporter = newSpyExporter(t)
+
 	tracerProvider := traceSDK.NewTracerProvider(
 		traceSDK.WithSpanProcessor(&SpySpanProcessor{TB: t,
 			SpanProcessor: traceSDK.NewSimpleSpanProcessor(&SpySpanExporter{TB: t,
-				SpanExporter: tracetest.NewNoopExporter()})}))
+				SpanExporter: spanExporter})}))
 
 	propagator := propagation.TraceContext{}
 
@@ -36,9 +43,13 @@ func TestSpikeOTEL(t *testing.T) {
 		ExportWorks(t, tracerProvider, propagator)
 	})
 
-	t.Run("ExportDoesNotWorks", func(t *testing.T) {
+	t.Run("ExportDoesNotWorksV1", func(t *testing.T) {
 		defer tracerProvider.ForceFlush(context.Background())
-		ExportDoesNotWorks(t, tracerProvider, propagator)
+		ExportDoesNotWorksV1(t, tracerProvider, propagator)
+	})
+	t.Run("ExportDoesNotWorksV2", func(t *testing.T) {
+		defer tracerProvider.ForceFlush(context.Background())
+		ExportDoesNotWorksV2(t, tracerProvider, propagator)
 	})
 }
 
@@ -50,10 +61,14 @@ func ExportWorks(tb testing.TB, tracerProvider trace.TracerProvider, propagator 
 		Start(ctx, "spanName") // TODO: check span options
 	defer span.End() // TODO: check end options?
 
+	debugSpan(tb, ctx)
+
+	span.AddEvent("test")
+
 	tb.Log(trace.SpanContextFromContext(ctx).TraceID().String())
 }
 
-func ExportDoesNotWorks(tb testing.TB, tracerProvider trace.TracerProvider, propagator propagation.TextMapPropagator) {
+func ExportDoesNotWorksV1(tb testing.TB, tracerProvider trace.TracerProvider, propagator propagation.TextMapPropagator) {
 	ctx := context.Background()
 
 	tID, sID := newTraceID()
@@ -69,9 +84,59 @@ func ExportDoesNotWorks(tb testing.TB, tracerProvider trace.TracerProvider, prop
 
 	tb.Log(trace.SpanContextFromContext(ctx).TraceID().String())
 
+	span.AddEvent("test-asdf")
+
 	outboundRequest := FakeCarrier{}
 	propagator.Inject(ctx, outboundRequest)
 	tb.Logf("%#v", outboundRequest)
+}
+
+func ExportDoesNotWorksV2(tb testing.TB, tracerProvider trace.TracerProvider, propagator propagation.TextMapPropagator) {
+	ctx := context.Background()
+
+	ctx, span := tracerProvider.
+		Tracer("name").        // TODO: check tracer options
+		Start(ctx, "spanName") // TODO: check span options
+	defer span.End() // TODO: check end options?
+
+	tID, sID := newTraceID()
+	inboundRequestMeta := FakeCarrier{"traceparent": traceIDToHeader(tID, sID)}
+	ctx = propagator.Extract(ctx, inboundRequestMeta)
+
+	tb.Logf("%#v", trace.SpanFromContext(ctx))
+
+	debugSpan(tb, ctx)
+	tb.Log(trace.SpanContextFromContext(ctx).TraceID().String())
+
+	outboundRequest := FakeCarrier{}
+	propagator.Inject(ctx, outboundRequest)
+
+	assert.Must(tb).Contain(outboundRequest[headerKey], tID.String())
+	assert.Must(tb).Contain(outboundRequest[headerKey], sID.String())
+
+	tb.Logf("traceID:%s spanID:%s", tID, sID)
+	tb.Log("outbound request tracing, and expected tracingID", outboundRequest[headerKey], tID.String())
+
+	tb.Logf("%#v", outboundRequest)
+}
+
+func DummyTraceStartOpts() []trace.SpanStartOption {
+	r := httptest.NewRequest(http.MethodGet, "/users/123", nil)
+	return []trace.SpanStartOption{
+		trace.WithAttributes(semconv.NetAttributesFromHTTPRequest("tcp", r)...),
+		trace.WithAttributes(semconv.EndUserAttributesFromHTTPRequest(r)...),
+		trace.WithAttributes(semconv.HTTPServerAttributesFromHTTPRequest("serviceName", "/users/{userID}", r)...),
+		trace.WithSpanKind(trace.SpanKindServer),
+	}
+}
+
+func debugSpan(tb testing.TB, ctx context.Context) {
+	span := trace.SpanFromContext(ctx)
+	if span == nil {
+		tb.Log("no span found in the current context")
+		return
+	}
+	tb.Logf("%T %#v", span, span)
 }
 
 type FakeCarrier map[string]string
