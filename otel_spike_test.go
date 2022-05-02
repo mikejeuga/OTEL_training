@@ -38,12 +38,15 @@ func TestSpikeOTEL(t *testing.T) {
 
 	propagator := propagation.TraceContext{}
 
-	t.Run("ExportWorks", func(t *testing.T) {
+	t.Run("WIP", func(t *testing.T) {
+		defer tracerProvider.ForceFlush(context.Background())
+		ExportWIP(t, tracerProvider, propagator)
+	})
+	t.Run("ok", func(t *testing.T) {
 		defer tracerProvider.ForceFlush(context.Background())
 		ExportWorks(t, tracerProvider, propagator)
 	})
-
-	t.Run("ExportDoesNotWorksV1", func(t *testing.T) {
+	t.Run("nok", func(t *testing.T) {
 		defer tracerProvider.ForceFlush(context.Background())
 		ExportDoesNotWorksV1(t, tracerProvider, propagator)
 	})
@@ -63,9 +66,32 @@ func ExportWorks(tb testing.TB, tracerProvider trace.TracerProvider, propagator 
 
 	debugSpan(tb, ctx)
 
-	span.AddEvent("test")
+	span.AddEvent("test this out")
 
 	tb.Log(trace.SpanContextFromContext(ctx).TraceID().String())
+}
+
+func ExportWIP(tb testing.TB, tracerProvider trace.TracerProvider, propagator propagation.TextMapPropagator) {
+	ctx := context.Background()
+
+	tID, sID := newTraceID()
+	inboundRequestMeta := FakeCarrier{"traceparent": traceIDToHeader(tID, sID)}
+	ctx = propagator.Extract(ctx, inboundRequestMeta)
+
+	tb.Log(trace.SpanContextFromContext(ctx).TraceID().String())
+
+	ctx, span := tracerProvider.
+		Tracer("name").        // TODO: check tracer options
+		Start(ctx, "spanName") // TODO: check span options
+	defer span.End() // TODO: check end options?
+
+	tb.Log(trace.SpanContextFromContext(ctx).TraceID().String())
+
+	span.AddEvent("test-asdf")
+
+	outboundRequest := FakeCarrier{}
+	propagator.Inject(ctx, outboundRequest)
+	tb.Logf("%#v", outboundRequest)
 }
 
 func ExportDoesNotWorksV1(tb testing.TB, tracerProvider trace.TracerProvider, propagator propagation.TextMapPropagator) {

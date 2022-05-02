@@ -18,8 +18,11 @@ const (
 var traceCtxRegExp = regexp.MustCompile("^(?P<version>[0-9a-f]{2})-(?P<traceID>[a-f0-9]{32})-(?P<spanID>[a-f0-9]{16})-(?P<traceFlags>[a-f0-9]{2})(?:-.*)?$")
 
 func TestSpikeExtract(t *testing.T) {
+	headerValue := traceIDToHeader(newTraceID())
+	headerValue = "00-d41c1b69fdcf0b087fc0cdf0df436689-07c3d2d11ca3dca5-00"
+
 	carrier := make(HeaderCarrier)
-	carrier.Set("traceparent", traceIDToHeader(newTraceID()))
+	carrier.Set("traceparent", headerValue)
 
 	h := carrier.Get(traceparentHeader)
 	if h == "" {
